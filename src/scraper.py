@@ -30,12 +30,19 @@ HEADERS = {
         "AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/124.0.0.0 Safari/537.36"
     ),
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
     "Accept-Language": "de-CH,de;q=0.9,en;q=0.8",
     "Accept-Encoding": "gzip, deflate, br",
     "DNT": "1",
     "Connection": "keep-alive",
     "Upgrade-Insecure-Requests": "1",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Sec-Fetch-User": "?1",
+    "sec-ch-ua": '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+    "sec-ch-ua-mobile": "?0",
+    "sec-ch-ua-platform": '"macOS"',
 }
 
 
@@ -44,6 +51,19 @@ class RicardoScraper:
         self.delay = request_delay
         self.session = requests.Session()
         self.session.headers.update(HEADERS)
+        self._warmed_up = False
+
+    def _warmup(self) -> None:
+        """Visit the homepage once to pick up cookies and establish a real session."""
+        if self._warmed_up:
+            return
+        try:
+            self.session.headers.update({"Sec-Fetch-Site": "none", "Referer": ""})
+            self.session.get(BASE_URL, timeout=15)
+            self._warmed_up = True
+            time.sleep(random.uniform(1.5, 3.0))
+        except Exception:
+            pass  # Best-effort; don't block scraping if warmup fails
 
     # ------------------------------------------------------------------ #
     #  Public interface                                                    #
@@ -51,14 +71,17 @@ class RicardoScraper:
 
     def fetch_listings(self, search_url: str, max_listings: int = 30) -> list[Listing]:
         """Fetch up to *max_listings* listings from a Ricardo search URL."""
+        self._warmup()
+
         listings: list[Listing] = []
         page = 1
+        prev_url = BASE_URL  # Referer starts at homepage after warmup
 
         while len(listings) < max_listings:
             url = self._page_url(search_url, page)
             logger.debug("Fetching %s", url)
 
-            html = self._get_html(url)
+            html = self._get_html(url, referer=prev_url)
             if html is None:
                 break
 
@@ -72,17 +95,18 @@ class RicardoScraper:
                 # Fewer results than expected — probably the last page
                 break
 
+            prev_url = url
             page += 1
-            time.sleep(self.delay + random.uniform(0, 1))
+            time.sleep(self.delay + random.uniform(1.0, 3.0))
 
         return listings[:max_listings]
 
-    def fetch_listing_detail(self, listing: Listing) -> Listing:
+    def fetch_listing_detail(self, listing: Listing, referer: str = BASE_URL) -> Listing:
         """Enrich a listing with the full description from its detail page."""
         if not listing.url:
             return listing
 
-        html = self._get_html(listing.url)
+        html = self._get_html(listing.url, referer=referer)
         if html is None:
             return listing
 
@@ -368,15 +392,19 @@ class RicardoScraper:
     #  HTTP helpers                                                        #
     # ------------------------------------------------------------------ #
 
-    def _get_html(self, url: str) -> Optional[str]:
+    def _get_html(self, url: str, referer: str = "") -> Optional[str]:
+        headers: dict[str, str] = {"Sec-Fetch-Site": "same-origin" if referer else "none"}
+        if referer:
+            headers["Referer"] = referer
         for attempt in range(3):
             try:
-                resp = self.session.get(url, timeout=30)
+                resp = self.session.get(url, timeout=30, headers=headers)
                 resp.raise_for_status()
                 return resp.text
             except requests.HTTPError as e:
                 if e.response is not None and e.response.status_code in (403, 429):
-                    wait = 10 * (attempt + 1)
+                    # Exponential backoff: 30s, 90s, 270s
+                    wait = 30 * (3 ** attempt)
                     logger.warning("Rate-limited (%s). Waiting %ds…", e.response.status_code, wait)
                     time.sleep(wait)
                 else:
