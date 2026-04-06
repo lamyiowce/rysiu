@@ -6,9 +6,10 @@ Monitors saved searches on Ricardo.ch and uses Claude to alert you
 only when a listing is genuinely worth buying.
 
 Usage:
-    python main.py              # Run once immediately, then on the configured schedule
+    python main.py              # Run monitoring + Telegram bot together
     python main.py --once       # Run a single cycle and exit
     python main.py --test       # Dry-run scraper only (no Claude calls, no Telegram)
+    python main.py --no-bot     # Run monitoring only, without the Telegram bot
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ import argparse
 import logging
 import os
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -122,6 +124,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Ricardo Deal Analyzer")
     parser.add_argument("--once", action="store_true", help="Run one cycle and exit")
     parser.add_argument("--test", action="store_true", help="Scraper dry-run, no AI calls")
+    parser.add_argument("--no-bot", action="store_true", help="Disable the Telegram bot (monitoring only)")
     parser.add_argument("--config", default="config.yaml", help="Path to config file")
     args = parser.parse_args()
 
@@ -144,18 +147,34 @@ def main() -> None:
 
     model = config.get("openai", {}).get("model", "gpt-4o")
 
-    pipeline = MonitoringPipeline(
-        searches=searches,
-        model=model,
-        max_listings_per_search=max_listings,
-        request_delay=delay,
-    )
+    def run_monitoring_cycle() -> None:
+        """Re-read config each cycle so searches added via the bot are picked up."""
+        fresh_config = load_config(args.config)
+        fresh_searches = build_searches(fresh_config)
+        pipeline = MonitoringPipeline(
+            searches=fresh_searches,
+            model=model,
+            max_listings_per_search=max_listings,
+            request_delay=delay,
+        )
+        pipeline.run_once()
 
     if args.once:
-        pipeline.run_once()
+        run_monitoring_cycle()
         return
 
-    # Scheduled mode
+    # Start the Telegram bot in a background thread
+    if not args.no_bot:
+        try:
+            from src.bot import TelegramBot
+            bot = TelegramBot(model=model)
+            bot_thread = threading.Thread(target=bot.run, daemon=True, name="telegram-bot")
+            bot_thread.start()
+            logger.info("Telegram bot started in background thread.")
+        except RuntimeError as e:
+            logger.warning("Telegram bot disabled: %s", e)
+
+    # Scheduled monitoring
     logger.info(
         "Starting Rysiu — monitoring %d search(es) every %d minutes.",
         len(searches),
@@ -163,9 +182,9 @@ def main() -> None:
     )
 
     # Run immediately on startup
-    pipeline.run_once()
+    run_monitoring_cycle()
 
-    schedule.every(interval).minutes.do(pipeline.run_once)
+    schedule.every(interval).minutes.do(run_monitoring_cycle)
     logger.info("Next run in %d minutes. Press Ctrl+C to stop.", interval)
 
     while True:
