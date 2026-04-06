@@ -122,6 +122,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Ricardo Deal Analyzer")
     parser.add_argument("--once", action="store_true", help="Run one cycle and exit")
     parser.add_argument("--test", action="store_true", help="Scraper dry-run, no AI calls")
+    parser.add_argument("--bot", action="store_true", help="Run Telegram bot for managing searches via chat")
     parser.add_argument("--config", default="config.yaml", help="Path to config file")
     args = parser.parse_args()
 
@@ -135,6 +136,13 @@ def main() -> None:
         return
 
     check_env()
+
+    if args.bot:
+        model = config.get("openai", {}).get("model", "gpt-4o")
+        from src.bot import TelegramBot
+        bot = TelegramBot(model=model)
+        bot.run()
+        return
     db.init_db()
 
     monitoring = config.get("monitoring", {})
