@@ -38,11 +38,14 @@ class ParsedSearch(BaseModel):
     name: str = Field(
         description="Short, descriptive name for this search (e.g. 'Nintendo Switch OLED')"
     )
-    search_query: str = Field(
+    search_query: Optional[str] = Field(
+        default=None,
         description=(
-            "Search query to use on Ricardo.ch — just the keywords, "
-            "e.g. 'macbook pro m3' or 'nintendo switch oled'"
-        )
+            "Short search query (1-3 keywords) to use on Ricardo.ch, "
+            "e.g. 'macbook pro m3' or 'nintendo switch oled'. "
+            "Keep it short — too many keywords will return no results. "
+            "Set to null if the user provides a direct Ricardo.ch URL in their message."
+        ),
     )
     context: str = Field(
         description=(
@@ -67,9 +70,17 @@ configurations for a Swiss second-hand marketplace monitor (Ricardo.ch).
 
 The user will send a casual message describing what they want to buy. Extract:
 - A short name for the search
-- A search query (keywords for Ricardo.ch, in the language the user wrote)
+- A search query: keep it SHORT (1-3 keywords max). Ricardo.ch treats multiple \
+  words as AND — too many keywords returns zero results. Pick only the most \
+  essential keyword(s) that capture what the user wants. For example: \
+  "plattenspieler" not "plattenspieler thorens technics dual pioneer". \
+  Put brand/model preferences in the context instead.
+- If the user provides a direct Ricardo.ch URL, set search_query to null — \
+  the URL will be used as-is.
 - A detailed buyer context paragraph (expand on what the user said — include \
-  reasonable assumptions about condition, specs, and dealbreakers)
+  reasonable assumptions about condition, specs, and dealbreakers). Include \
+  specific brands, models, or features the user mentioned here so the deal \
+  analyzer can evaluate them.
 - A max_price if the user mentions a budget or price ceiling
 - A min_deal_score (default 7, lower if the user seems flexible, higher if picky)
 
@@ -175,13 +186,20 @@ class TelegramBot:
             "*Examples:*\n"
             "• _I want a MacBook Air M2 under 900 CHF_\n"
             "• _Looking for a PS5 in good condition, budget 350_\n"
-            "• _Monitor Sony WH\\-1000XM5 headphones_\n\n"
+            "• _Monitor Sony WH\\-1000XM5 headphones_\n"
+            "• _https://www\\.ricardo\\.ch/de/c/hifi\\-audio\\-12345 — turntables under 300_\n\n"
             "*Commands:*\n"
             "/list — show all monitored searches\n"
             "/remove Name — stop monitoring a search\n"
             "/help — show this message",
             parse_mode="MarkdownV2",
         )
+
+    @staticmethod
+    def _extract_ricardo_url(text: str) -> Optional[str]:
+        """Extract a ricardo.ch URL from the user's message, if present."""
+        match = re.search(r'https?://(?:www\.)?ricardo\.ch/\S+', text)
+        return match.group(0).rstrip(".,;)") if match else None
 
     def _handle_add(self, chat_id: str, text: str) -> None:
         self._send(chat_id, "🔍 Parsing your request…")
@@ -191,8 +209,15 @@ class TelegramBot:
             self._send(chat_id, "❌ Sorry, I couldn't understand that. Try something like:\n\"I want a MacBook Pro under 1500 CHF\"")
             return
 
-        # Build the Ricardo search URL
-        url = f"https://www.ricardo.ch/de/s/{quote_plus(parsed.search_query)}/"
+        # Use URL from message if present, otherwise build from search_query
+        explicit_url = self._extract_ricardo_url(text)
+        if explicit_url:
+            url = explicit_url
+        elif parsed.search_query:
+            url = f"https://www.ricardo.ch/de/s/{quote_plus(parsed.search_query)}/"
+        else:
+            self._send(chat_id, "❌ I need either a Ricardo.ch URL or a search query. Try again with one of those.")
+            return
 
         search = cm.add_search(
             name=parsed.name,
