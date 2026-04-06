@@ -28,14 +28,22 @@ HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/124.0.0.0 Safari/537.36"
+        "Chrome/131.0.0.0 Safari/537.36"
     ),
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "Accept-Language": "de-CH,de;q=0.9,en;q=0.8",
-    "Accept-Encoding": "gzip, deflate, br",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+    "Accept-Language": "de-CH,de;q=0.9,en-US;q=0.8,en;q=0.7",
+    "Accept-Encoding": "gzip, deflate, br, zstd",
     "DNT": "1",
     "Connection": "keep-alive",
     "Upgrade-Insecure-Requests": "1",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Sec-Fetch-User": "?1",
+    "Sec-Ch-Ua": '"Chromium";v="131", "Not_A Brand";v="24"',
+    "Sec-Ch-Ua-Mobile": "?0",
+    "Sec-Ch-Ua-Platform": '"macOS"',
+    "Cache-Control": "max-age=0",
 }
 
 
@@ -44,6 +52,7 @@ class RicardoScraper:
         self.delay = request_delay
         self.session = requests.Session()
         self.session.headers.update(HEADERS)
+        self._warmed_up = False
 
     # ------------------------------------------------------------------ #
     #  Public interface                                                    #
@@ -368,7 +377,26 @@ class RicardoScraper:
     #  HTTP helpers                                                        #
     # ------------------------------------------------------------------ #
 
+    def _warm_up_session(self) -> None:
+        """Visit the homepage to collect cookies before making search requests."""
+        if self._warmed_up:
+            return
+        try:
+            logger.debug("Warming up session (visiting homepage)…")
+            resp = self.session.get(BASE_URL + "/de/", timeout=30)
+            logger.debug("Homepage status: %s, cookies: %s", resp.status_code, list(self.session.cookies.keys()))
+            # After visiting the homepage, subsequent navigations are same-origin
+            self.session.headers.update({
+                "Sec-Fetch-Site": "same-origin",
+                "Referer": BASE_URL + "/de/",
+            })
+            time.sleep(1 + random.uniform(0, 1))
+        except requests.RequestException as e:
+            logger.debug("Homepage warm-up failed: %s", e)
+        self._warmed_up = True
+
     def _get_html(self, url: str) -> Optional[str]:
+        self._warm_up_session()
         for attempt in range(3):
             try:
                 resp = self.session.get(url, timeout=30)
@@ -377,6 +405,12 @@ class RicardoScraper:
             except requests.HTTPError as e:
                 if e.response is not None and e.response.status_code in (403, 429):
                     wait = 10 * (attempt + 1)
+                    body = e.response.text[:500] if e.response.text else ""
+                    if "cloudflare" in body.lower() or "challenge" in body.lower():
+                        logger.warning(
+                            "Blocked by bot protection (Cloudflare challenge). "
+                            "Consider running with a residential IP or adding a delay."
+                        )
                     logger.warning("Rate-limited (%s). Waiting %ds…", e.response.status_code, wait)
                     time.sleep(wait)
                 else:
