@@ -3,16 +3,24 @@ name: Ricardo Monitor
 on:
   schedule:
     - cron: '0 8 * * *'  # every day at 08:00 UTC
-  workflow_dispatch:          # also allow manual runs from the Actions tab
+  workflow_dispatch:       # allow manual runs from the Actions tab
 
 jobs:
   monitor:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write  # needed to commit the state file back
 
     steps:
       - uses: actions/checkout@v4
+
+      # Restore seen.json from the most recent cache (no git commits needed).
+      # key changes every run so a fresh entry is always saved;
+      # restore-keys picks up whatever was saved last time.
+      - name: Restore seen-listings cache
+        uses: actions/cache@v4
+        with:
+          path: data/seen.json
+          key: seen-listings-${{ github.run_id }}
+          restore-keys: seen-listings-
 
       - uses: actions/setup-python@v5
         with:
@@ -27,11 +35,3 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-
-      - name: Persist state
-        run: |
-          git config user.name  "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add data/seen.json
-          git diff --staged --quiet || git commit -m "chore: update seen listings [skip ci]"
-          git push

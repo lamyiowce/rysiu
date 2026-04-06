@@ -4,5 +4,4 @@ __pycache__/
 *.pyo
 .venv/
 venv/
-# keep data/seen.json tracked — it's the persisted state for GitHub Actions
-data/*.db
+data/
