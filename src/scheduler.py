@@ -9,7 +9,7 @@ from typing import Optional
 from . import database as db
 from .analyzer import DealAnalyzer
 from .models import Listing, SearchConfig
-from .notifier import EmailNotifier, TelegramNotifier
+from .notifier import TelegramNotifier
 from .scraper import RicardoScraper
 
 logger = logging.getLogger(__name__)
@@ -19,7 +19,6 @@ class MonitoringPipeline:
     def __init__(
         self,
         searches: list[SearchConfig],
-        config: dict,
         model: str = "gpt-4o",
         max_listings_per_search: int = 30,
         request_delay: float = 2.0,
@@ -28,8 +27,7 @@ class MonitoringPipeline:
         self.max_listings = max_listings_per_search
         self.scraper = RicardoScraper(request_delay=request_delay)
         self.analyzer = DealAnalyzer(model=model)
-        self.telegram = TelegramNotifier()
-        self.email = EmailNotifier(config)
+        self.notifier = TelegramNotifier()
 
     def run_once(self) -> None:
         """Run one full monitoring cycle across all configured searches."""
@@ -105,9 +103,7 @@ class MonitoringPipeline:
                     result.deal_score,
                     listing.title,
                 )
-                self.telegram.send_deal_alert(listing, result, search)
-                if self.email.should_send(result):
-                    self.email.send_deal_alert(listing, result, search)
+                self.notifier.send_deal_alert(listing, result, search)
             else:
                 logger.debug(
                     "[%s] No alert (score %d < threshold %d)",

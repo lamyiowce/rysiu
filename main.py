@@ -146,7 +146,6 @@ def main() -> None:
 
     pipeline = MonitoringPipeline(
         searches=searches,
-        config=config,
         model=model,
         max_listings_per_search=max_listings,
         request_delay=delay,
