@@ -14,6 +14,7 @@ import logging
 import os
 import re
 import time
+from pathlib import Path
 from typing import Optional
 from urllib.parse import quote_plus
 
@@ -27,6 +28,89 @@ logger = logging.getLogger(__name__)
 
 TELEGRAM_API = "https://api.telegram.org"
 
+# ------------------------------------------------------------------ #
+#  Ricardo category tree                                               #
+# ------------------------------------------------------------------ #
+
+_CATEGORIES_PATH = Path(__file__).parent.parent / "categories.json"
+
+
+def _load_categories() -> list[dict]:
+    """Load the Ricardo category tree from categories.json.
+
+    Returns a flat list of dicts with keys: id, slug, name, parent_name.
+    """
+    if not _CATEGORIES_PATH.exists():
+        logger.warning("categories.json not found — category matching disabled")
+        return []
+
+    with _CATEGORIES_PATH.open() as f:
+        raw = json.load(f)
+
+    flat: list[dict] = []
+    for cat in raw:
+        slug = cat["to"].rstrip("/").split("/")[-1]
+        flat.append({"id": cat["id"], "slug": slug, "name": cat["name"], "parent_name": None})
+        for sub in cat.get("subCategories", []):
+            sub_slug = sub["to"].rstrip("/").split("/")[-1]
+            flat.append({"id": sub["id"], "slug": sub_slug, "name": sub["name"], "parent_name": cat["name"]})
+    return flat
+
+
+def _build_top_level_list(categories: list[dict]) -> str:
+    """Build a compact text list of top-level categories for the LLM prompt."""
+    lines = []
+    for c in categories:
+        if c["parent_name"] is None:
+            lines.append(f"- {c['name']} (id={c['id']})")
+    return "\n".join(lines)
+
+
+def _find_best_category(categories: list[dict], category_id: Optional[int], search_query: Optional[str]) -> Optional[dict]:
+    """Find the best matching category.
+
+    If category_id is given, return the matching category.
+    If search_query is also given, try to find a subcategory under category_id
+    whose name matches the query (simple substring match).
+    """
+    if not category_id or not categories:
+        return None
+
+    # Find the top-level category
+    parent = None
+    children: list[dict] = []
+    for c in categories:
+        if c["id"] == category_id:
+            parent = c
+        elif c["parent_name"] is not None:
+            # Check if this subcategory belongs to category_id
+            pass
+
+    if parent is None:
+        return None
+
+    # Gather subcategories under this parent
+    for c in categories:
+        if c["parent_name"] == parent["name"]:
+            children.append(c)
+
+    # If we have a search query, try to match a subcategory
+    if search_query and children:
+        query_lower = search_query.lower()
+        query_words = query_lower.split()
+        best_match = None
+        best_score = 0
+        for child in children:
+            name_lower = child["name"].lower()
+            score = sum(1 for w in query_words if w in name_lower)
+            if score > best_score:
+                best_score = score
+                best_match = child
+        if best_match:
+            return best_match
+
+    return parent
+
 
 # ------------------------------------------------------------------ #
 #  Structured output for parsing user messages                        #
@@ -35,7 +119,24 @@ TELEGRAM_API = "https://api.telegram.org"
 class ParsedSearch(BaseModel):
     """What the user wants to monitor, extracted from their message."""
 
+    is_valid: bool = Field(
+        description=(
+            "True if the message is a genuine request to monitor a product or "
+            "category on Ricardo.ch. False if the message is gibberish, a greeting, "
+            "a question, spam, or anything that doesn't express intent to buy/monitor "
+            "a specific product or category of products."
+        )
+    )
+    rejection_reason: Optional[str] = Field(
+        default=None,
+        description=(
+            "If is_valid is false, a brief friendly explanation of why the message "
+            "can't be turned into a search (e.g. 'This looks like a greeting, not a "
+            "product search'). Null when is_valid is true."
+        ),
+    )
     name: str = Field(
+        default="",
         description="Short, descriptive name for this search (e.g. 'Nintendo Switch OLED')"
     )
     search_query: Optional[str] = Field(
@@ -47,7 +148,16 @@ class ParsedSearch(BaseModel):
             "Set to null if the user provides a direct Ricardo.ch URL in their message."
         ),
     )
+    category_id: Optional[int] = Field(
+        default=None,
+        description=(
+            "The Ricardo.ch top-level category ID that best matches this search. "
+            "Pick the single most relevant category from the list provided. "
+            "Set to null only if no category is a reasonable fit."
+        ),
+    )
     context: str = Field(
+        default="",
         description=(
             "Natural language context for the deal analyzer, describing what the "
             "user wants: condition, specs, budget, dealbreakers, etc. "
@@ -68,7 +178,13 @@ _PARSE_SYSTEM_PROMPT = """\
 You are a helpful assistant that parses user requests into structured search \
 configurations for a Swiss second-hand marketplace monitor (Ricardo.ch).
 
-The user will send a casual message describing what they want to buy. Extract:
+FIRST: decide if the message is a valid product search request. Set is_valid \
+to false if it's gibberish, a greeting, a question not about buying, spam, or \
+anything that doesn't express intent to buy or monitor a specific product or \
+category. When is_valid is false, set rejection_reason and leave other fields \
+at their defaults — do NOT invent a search.
+
+If the message IS a valid search request, extract:
 - A short name for the search
 - A search query: keep it SHORT (1-3 keywords max). Ricardo.ch treats multiple \
   words as AND — too many keywords returns zero results. Pick only the most \
@@ -77,6 +193,8 @@ The user will send a casual message describing what they want to buy. Extract:
   Put brand/model preferences in the context instead.
 - If the user provides a direct Ricardo.ch URL, set search_query to null — \
   the URL will be used as-is.
+- A category_id: pick the best matching top-level category from this list:
+{categories}
 - A detailed buyer context paragraph (expand on what the user said — include \
   reasonable assumptions about condition, specs, and dealbreakers). Include \
   specific brands, models, or features the user mentioned here so the deal \
@@ -98,6 +216,8 @@ class TelegramBot:
         self.openai = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
         self.model = model
         self._offset: int = 0
+        self._categories = _load_categories()
+        self._category_prompt = _build_top_level_list(self._categories)
 
         if not self.token:
             raise RuntimeError("TELEGRAM_BOT_TOKEN is required for bot mode")
@@ -209,12 +329,23 @@ class TelegramBot:
             self._send(chat_id, "❌ Sorry, I couldn't understand that. Try something like:\n\"I want a MacBook Pro under 1500 CHF\"")
             return
 
+        # Reject invalid/nonsensical messages
+        if not parsed.is_valid:
+            reason = parsed.rejection_reason or "That doesn't look like a product search."
+            self._send(chat_id, f"🤔 {reason}\n\nTry something like:\n\"I want a MacBook Pro under 1500 CHF\"")
+            return
+
         # Use URL from message if present, otherwise build from search_query
         explicit_url = self._extract_ricardo_url(text)
         if explicit_url:
             url = explicit_url
         elif parsed.search_query:
-            url = f"https://www.ricardo.ch/de/s/{quote_plus(parsed.search_query)}/"
+            # Try to find the best category for a scoped search URL
+            category = _find_best_category(self._categories, parsed.category_id, parsed.search_query)
+            if category:
+                url = f"https://www.ricardo.ch/de/c/{category['slug']}/{quote_plus(parsed.search_query)}/"
+            else:
+                url = f"https://www.ricardo.ch/de/s/{quote_plus(parsed.search_query)}/"
         else:
             self._send(chat_id, "❌ I need either a Ricardo.ch URL or a search query. Try again with one of those.")
             return
@@ -228,10 +359,15 @@ class TelegramBot:
         )
 
         # Confirm to the user
+        category = _find_best_category(self._categories, parsed.category_id, parsed.search_query)
+        cat_info = f"📂 Category: {category['name']}" if category else ""
+
         lines = [
             f"✅ Now monitoring: *{self._esc(search.name)}*\n",
             f"🔗 {self._esc(url)}",
         ]
+        if cat_info:
+            lines.append(self._esc(cat_info))
         if search.max_price:
             lines.append(f"💰 Max price: CHF {search.max_price:,.0f}")
         lines.append(f"📊 Alert threshold: {search.min_deal_score}/10")
@@ -246,10 +382,13 @@ class TelegramBot:
 
     def _parse_message(self, text: str) -> Optional[ParsedSearch]:
         try:
+            system_prompt = _PARSE_SYSTEM_PROMPT.format(
+                categories=self._category_prompt or "(no categories available)"
+            )
             response = self.openai.beta.chat.completions.parse(
                 model=self.model,
                 messages=[
-                    {"role": "system", "content": _PARSE_SYSTEM_PROMPT},
+                    {"role": "system", "content": system_prompt},
                     {"role": "user", "content": text},
                 ],
                 response_format=ParsedSearch,
