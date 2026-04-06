@@ -36,4 +36,4 @@ monitoring:
   request_delay_seconds: 2    # Polite delay between HTTP requests
 
 openai:
-  model: "gpt-4o"  # or gpt-4o-mini for lower cost
+  model: "gpt-5.4"
