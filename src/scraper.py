@@ -16,6 +16,7 @@ from typing import Any, Optional
 from urllib.parse import urljoin, urlparse, urlencode, parse_qs
 
 import requests
+from curl_cffi import requests as cffi_requests
 from bs4 import BeautifulSoup
 
 from .models import Listing
@@ -25,33 +26,33 @@ logger = logging.getLogger(__name__)
 BASE_URL = "https://www.ricardo.ch"
 
 HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/124.0.0.0 Safari/537.36"
-    ),
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
     "Accept-Language": "de-CH,de;q=0.9,en;q=0.8",
-    "Accept-Encoding": "gzip, deflate, br",
     "DNT": "1",
-    "Connection": "keep-alive",
     "Upgrade-Insecure-Requests": "1",
     "Sec-Fetch-Dest": "document",
     "Sec-Fetch-Mode": "navigate",
     "Sec-Fetch-Site": "none",
     "Sec-Fetch-User": "?1",
-    "sec-ch-ua": '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
-    "sec-ch-ua-mobile": "?0",
-    "sec-ch-ua-platform": '"macOS"',
 }
+
+# Browser versions to impersonate via curl_cffi (rotated per session)
+_BROWSER_VERSIONS = [
+    "chrome131",
+    "chrome136",
+    "chrome142",
+    "chrome145",
+]
 
 
 class RicardoScraper:
     def __init__(self, request_delay: float = 2.0):
         self.delay = request_delay
-        self.session = requests.Session()
+        self._impersonate = random.choice(_BROWSER_VERSIONS)
+        self.session = cffi_requests.Session(impersonate=self._impersonate)
         self.session.headers.update(HEADERS)
         self._warmed_up = False
+        logger.debug("Using browser fingerprint: %s", self._impersonate)
 
     def _warmup(self) -> None:
         """Visit the homepage once to pick up cookies and establish a real session."""
@@ -401,16 +402,15 @@ class RicardoScraper:
                 resp = self.session.get(url, timeout=30, headers=headers)
                 resp.raise_for_status()
                 return resp.text
-            except requests.HTTPError as e:
+            except cffi_requests.exceptions.HTTPError as e:
                 if e.response is not None and e.response.status_code in (403, 429):
-                    # Exponential backoff: 30s, 90s, 270s
                     wait = 30 * (3 ** attempt)
                     logger.warning("Rate-limited (%s). Waiting %ds…", e.response.status_code, wait)
                     time.sleep(wait)
                 else:
                     logger.warning("HTTP error fetching %s: %s", url, e)
                     break
-            except requests.RequestException as e:
+            except (cffi_requests.exceptions.RequestException, requests.RequestException) as e:
                 logger.warning("Request failed for %s (attempt %d): %s", url, attempt + 1, e)
                 if attempt < 2:
                     time.sleep(2 ** attempt)
