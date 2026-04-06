@@ -30,6 +30,13 @@ notifications:
     enabled: true
     # Bot token and chat_id are read from environment variables (see .env)
 
+  email:
+    enabled: true
+    min_score: 9          # Only email for exceptional deals (9–10); Telegram covers the rest
+    smtp_host: smtp.gmail.com
+    smtp_port: 587
+    # Credentials and recipient are read from environment variables (see .env)
+
 monitoring:
   interval_minutes: 30        # How often to check for new listings
   max_listings_per_search: 30 # Max listings to fetch per search URL per run
