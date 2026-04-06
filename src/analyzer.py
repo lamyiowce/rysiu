@@ -1,4 +1,4 @@
-"""Deal analyzer — uses Claude Opus to evaluate each listing."""
+"""Deal analyzer — uses OpenAI to evaluate each listing."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import logging
 import os
 from typing import Optional
 
-import anthropic
+from openai import OpenAI
 
 from .models import AnalysisResult, Listing, SearchConfig
 
@@ -26,8 +26,8 @@ used goods. Err on the side of caution with red flags.
 
 
 class DealAnalyzer:
-    def __init__(self, model: str = "claude-opus-4-6"):
-        self.client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+    def __init__(self, model: str = "gpt-4o"):
+        self.client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
         self.model = model
 
     def analyze(self, listing: Listing, search: SearchConfig) -> Optional[AnalysisResult]:
@@ -35,15 +35,15 @@ class DealAnalyzer:
         prompt = self._build_prompt(listing, search)
 
         try:
-            response = self.client.messages.parse(
+            response = self.client.beta.chat.completions.parse(
                 model=self.model,
-                max_tokens=1024,
-                thinking={"type": "adaptive"},
-                system=_SYSTEM_PROMPT,
-                messages=[{"role": "user", "content": prompt}],
-                output_format=AnalysisResult,
+                messages=[
+                    {"role": "system", "content": _SYSTEM_PROMPT},
+                    {"role": "user", "content": prompt},
+                ],
+                response_format=AnalysisResult,
             )
-            return response.parsed_output
+            return response.choices[0].message.parsed
         except Exception as e:
             logger.error("Analysis failed for listing %s: %s", listing.id, e)
             return None

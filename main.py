@@ -72,7 +72,7 @@ def build_searches(config: dict) -> list[SearchConfig]:
 
 
 def check_env() -> None:
-    missing = [k for k in ("ANTHROPIC_API_KEY",) if not os.environ.get(k)]
+    missing = [k for k in ("OPENAI_API_KEY",) if not os.environ.get(k)]
     if missing:
         logger.error("Missing required environment variables: %s", ", ".join(missing))
         sys.exit(1)
@@ -142,8 +142,7 @@ def main() -> None:
     max_listings = monitoring.get("max_listings_per_search", 30)
     delay = monitoring.get("request_delay_seconds", 2.0)
 
-    claude_cfg = config.get("claude", {})
-    model = claude_cfg.get("model", "claude-opus-4-6")
+    model = config.get("openai", {}).get("model", "gpt-4o")
 
     pipeline = MonitoringPipeline(
         searches=searches,

@@ -35,5 +35,5 @@ monitoring:
   max_listings_per_search: 30 # Max listings to fetch per search URL per run
   request_delay_seconds: 2    # Polite delay between HTTP requests
 
-claude:
-  model: "claude-opus-4-6"
+openai:
+  model: "gpt-4o"  # or gpt-4o-mini for lower cost
