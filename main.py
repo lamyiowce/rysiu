@@ -55,13 +55,22 @@ def load_config(path: str = "config.yaml") -> dict:
         return yaml.safe_load(f)
 
 
+def _parse_urls(entry: dict) -> list[str]:
+    """Support both old ``url:`` and new ``urls:`` config keys."""
+    for key in ("urls", "url"):
+        if key in entry:
+            val = entry[key]
+            return val if isinstance(val, list) else [val]
+    return []
+
+
 def build_searches(config: dict) -> list[SearchConfig]:
     searches = []
     for entry in config.get("searches", []):
         searches.append(
             SearchConfig(
                 name=entry["name"],
-                url=entry["url"],
+                urls=_parse_urls(entry),
                 context=entry["context"],
                 max_price=entry.get("max_price"),
                 min_deal_score=entry.get("min_deal_score", 7),
@@ -101,10 +110,13 @@ def run_test(searches: list[SearchConfig], config: dict) -> None:
     for search in searches:
         print(f"\n{'='*60}")
         print(f"Search: {search.name}")
-        print(f"URL:    {search.url}")
+        for u in search.urls:
+            print(f"URL:    {u}")
         print(f"{'='*60}")
 
-        listings = scraper.fetch_listings(search.url, max_listings=min(max_l, 5))
+        listings = []
+        for u in search.urls:
+            listings.extend(scraper.fetch_listings(u, max_listings=min(max_l, 5)))
         if not listings:
             print("  ⚠️  No listings found — the scraper may need adjustment.")
             print("     Check if the URL works in a browser and if __NEXT_DATA__ is present.")

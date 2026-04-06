@@ -44,11 +44,17 @@ class MonitoringPipeline:
     # ------------------------------------------------------------------ #
 
     def _process_search(self, search: SearchConfig) -> None:
-        logger.info("[%s] Fetching listings from %s", search.name, search.url)
+        logger.info("[%s] Fetching listings from %d URL(s)", search.name, len(search.urls))
 
-        listings = self.scraper.fetch_listings(
-            search.url, max_listings=self.max_listings
-        )
+        listings: list[Listing] = []
+        seen_ids: set[str] = set()
+        for url in search.urls:
+            logger.info("[%s] Fetching %s", search.name, url)
+            for listing in self.scraper.fetch_listings(url, max_listings=self.max_listings):
+                if listing.id not in seen_ids:
+                    seen_ids.add(listing.id)
+                    listings.append(listing)
+
         logger.info("[%s] Found %d listings", search.name, len(listings))
 
         new_listings = [l for l in listings if not db.is_seen(l.id)]

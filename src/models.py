@@ -41,7 +41,7 @@ class SearchConfig:
     """One entry from the 'searches' list in config.yaml."""
 
     name: str
-    url: str
+    urls: list[str]
     context: str
     max_price: Optional[float] = None
     min_deal_score: int = 7
