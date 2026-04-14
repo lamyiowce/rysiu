@@ -34,7 +34,7 @@ jobs:
       - run: pip install -r requirements.txt
 
       - name: Write config
-        run: echo "$CONFIG_YAML" > config.yaml
+        run: printf '%s\n' "$CONFIG_YAML" > config.yaml
         env:
           CONFIG_YAML: ${{ secrets.CONFIG_YAML }}
 
