@@ -1,39 +1,30 @@
-# Ricardo Deal Analyzer — Configuration
-# Copy this file to config.yaml and customize your searches.
-
 searches:
-  - name: "MacBook Air M2"
-    # Direct Ricardo search URL — paste any search URL from the website
-    url: "https://www.ricardo.ch/de/s/macbook-air-m2/"
-    # Natural language context for Claude — be specific about what makes a good deal
-    context: |
-      I'm looking for a MacBook Air M2 (2022) in good or excellent condition.
-      Target specs: 8GB RAM minimum, 256GB or 512GB SSD, any color.
-      I'm willing to pay CHF 700–1050. A great deal would be anything under CHF 850
-      in excellent condition. Defective, broken, or "for parts" listings are not interesting.
-      I do not want devices with a cracked screen or missing charger.
-    max_price: 1050       # Pre-filter: skip listings above this price (CHF)
-    min_deal_score: 7     # Only alert for scores 7 or above (out of 10)
-
-  - name: "iPhone 15 Pro"
-    url: "https://www.ricardo.ch/de/s/iphone-15-pro/"
-    context: |
-      Looking for an iPhone 15 Pro (not Pro Max) in good condition or better,
-      any storage size from 128GB up. Budget is CHF 600–900.
-      Must be unlocked (SIM-free) or locked to Swisscom/Salt/Sunrise — no foreign locks.
-      Not interested in cracked screens, water damage, or battery below 85%.
-    max_price: 900
-    min_deal_score: 7
-
+- name: Beginner Turntable
+  urls:
+  - https://www.ricardo.ch/de/c/hifi-geraete-38498/plattenspieler/
+  - https://www.ricardo.ch/de/c/hifi-raritaeten-38555/plattenspieler/
+  context: I’m looking for a beginner-friendly used turntable in Switzerland, ideally
+    near 8050 Zürich Oerlikon for easier pickup. My budget is about CHF 100–200. I
+    want an automatic or semi-automatic model where the tonearm returns on its own;
+    fully manual turntables are a dealbreaker. I’m open to both belt-drive and direct-drive
+    if the deck is reliable and sounds good out of the box. Preferred brands are Thorens,
+    Technics, Dual, Pioneer, and Pro-Ject. Positive factors include a known good cartridge
+    already installed, especially Shure, Audio-Technica VM95 series, or Ortofon; confirmation
+    that the unit has been tested and is fully working; clear photos showing a clean
+    tonearm and stylus; and a recently replaced belt if it is a belt-drive model.
+    Nice extras are a built-in phono preamp and a dust cover. Red flags include listings
+    marked defekt/defective, missing or unknown stylus, no tonearm photos, a very
+    cheap no-name cartridge, visible heavy wear or rust around the motor area, and
+    fully manual-only operation. I want the analyzer to strongly favor reliable, easy-to-use
+    turntables that need minimal extra work or spending to get started.
+  max_price: 200.0
+  min_deal_score: 8
 notifications:
   telegram:
     enabled: true
-    # Bot token and chat_id are read from environment variables (see .env)
-
 monitoring:
-  interval_minutes: 30        # How often to check for new listings
-  max_listings_per_search: 30 # Max listings to fetch per search URL per run
-  request_delay_seconds: 2    # Polite delay between HTTP requests
-
+  interval_minutes: 30
+  max_listings_per_search: 30
+  request_delay_seconds: 2
 openai:
-  model: "gpt-5.4"
+  model: gpt-5.4
