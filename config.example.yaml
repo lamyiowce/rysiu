@@ -1,0 +1,28 @@
+# Ricardo Deal Analyzer — Configuration
+# Copy this file to config.yaml and customize your searches.
+# In CI, config is decoded from the CONFIG_YAML_B64 secret.
+
+searches:
+  - name: "MacBook Air M2"
+    urls:
+      - "https://www.ricardo.ch/de/s/macbook-air-m2/"
+      - "https://www.ricardo.ch/de/c/computer-netzwerk-39091/macbook+air+m2/"
+    context: |
+      I'm looking for a MacBook Air M2 (2022) in good or excellent condition.
+      Target specs: 8GB RAM minimum, 256GB or 512GB SSD, any color.
+      I'm willing to pay CHF 700-1050. A great deal would be anything under CHF 850
+      in excellent condition. Defective, broken, or "for parts" listings are not interesting.
+    max_price: 1050
+    min_deal_score: 7
+
+notifications:
+  telegram:
+    enabled: true
+
+monitoring:
+  interval_minutes: 30
+  max_listings_per_search: 30
+  request_delay_seconds: 2
+
+openai:
+  model: "gpt-4o"

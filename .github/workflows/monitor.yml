@@ -33,6 +33,11 @@ jobs:
 
       - run: pip install -r requirements.txt
 
+      - name: Write config
+        run: printf '%s\n' "$CONFIG_YAML" > config.yaml
+        env:
+          CONFIG_YAML: ${{ secrets.CONFIG_YAML }}
+
       - name: Run monitor
         run: python main.py --once
         env:

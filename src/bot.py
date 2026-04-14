@@ -148,12 +148,14 @@ class ParsedSearch(BaseModel):
             "Set to null if the user provides a direct Ricardo.ch URL in their message."
         ),
     )
-    category_id: Optional[int] = Field(
-        default=None,
+    category_ids: list[int] = Field(
+        default_factory=list,
         description=(
-            "The Ricardo.ch top-level category ID that best matches this search. "
-            "Pick the single most relevant category from the list provided. "
-            "Set to null only if no category is a reasonable fit."
+            "List of Ricardo.ch top-level category IDs where this product might "
+            "be listed. Sellers often list items in unexpected categories, so "
+            "include ALL plausible categories (usually 1-3). For example, a drone "
+            "could be in both 'Foto & Optik' and 'Modellbau & Hobby'. "
+            "Empty list only if no category is a reasonable fit."
         ),
     )
     context: str = Field(
@@ -193,7 +195,9 @@ If the message IS a valid search request, extract:
   Put brand/model preferences in the context instead.
 - If the user provides a direct Ricardo.ch URL, set search_query to null — \
   the URL will be used as-is.
-- A category_id: pick the best matching top-level category from this list:
+- category_ids: pick ALL plausible top-level categories from this list \
+  (sellers sometimes list items in unexpected categories, so include every \
+  category where the item could reasonably appear — usually 1-3):
 {categories}
 - A detailed buyer context paragraph (expand on what the user said — include \
   reasonable assumptions about condition, specs, and dealbreakers). Include \
@@ -321,6 +325,15 @@ class TelegramBot:
         match = re.search(r'https?://(?:www\.)?ricardo\.ch/\S+', text)
         return match.group(0).rstrip(".,;)") if match else None
 
+    def _build_category_urls(self, category_ids: list[int], search_query: str) -> list[str]:
+        """Build search URLs: plain search + one per matching category."""
+        urls = [f"https://www.ricardo.ch/de/s/{quote_plus(search_query)}/"]
+        for cid in category_ids:
+            cat = _find_best_category(self._categories, cid, search_query)
+            if cat:
+                urls.append(f"https://www.ricardo.ch/de/c/{cat['slug']}/{quote_plus(search_query)}/")
+        return urls
+
     def _handle_add(self, chat_id: str, text: str) -> None:
         self._send(chat_id, "🔍 Parsing your request…")
 
@@ -338,36 +351,27 @@ class TelegramBot:
         # Use URL from message if present, otherwise build from search_query
         explicit_url = self._extract_ricardo_url(text)
         if explicit_url:
-            url = explicit_url
+            urls = [explicit_url]
         elif parsed.search_query:
-            # Try to find the best category for a scoped search URL
-            category = _find_best_category(self._categories, parsed.category_id, parsed.search_query)
-            if category:
-                url = f"https://www.ricardo.ch/de/c/{category['slug']}/{quote_plus(parsed.search_query)}/"
-            else:
-                url = f"https://www.ricardo.ch/de/s/{quote_plus(parsed.search_query)}/"
+            urls = self._build_category_urls(parsed.category_ids, parsed.search_query)
         else:
             self._send(chat_id, "❌ I need either a Ricardo.ch URL or a search query. Try again with one of those.")
             return
 
         search = cm.add_search(
             name=parsed.name,
-            url=url,
+            urls=urls,
             context=parsed.context,
             max_price=parsed.max_price,
             min_deal_score=parsed.min_deal_score,
         )
 
         # Confirm to the user
-        category = _find_best_category(self._categories, parsed.category_id, parsed.search_query)
-        cat_info = f"📂 Category: {category['name']}" if category else ""
-
         lines = [
             f"✅ Now monitoring: *{self._esc(search.name)}*\n",
-            f"🔗 {self._esc(url)}",
         ]
-        if cat_info:
-            lines.append(self._esc(cat_info))
+        for u in urls:
+            lines.append(f"🔗 {self._esc(u)}")
         if search.max_price:
             lines.append(f"💰 Max price: CHF {search.max_price:,.0f}")
         lines.append(f"📊 Alert threshold: {search.min_deal_score}/10")

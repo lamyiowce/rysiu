@@ -25,6 +25,21 @@ def _save_raw(config: dict) -> None:
         yaml.dump(config, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
 
 
+def _parse_urls(entry: dict) -> list[str]:
+    """Read URLs from a config entry, supporting both old and new format.
+
+    Old format:  url: "https://..."
+    New format:  urls: ["https://...", "https://..."]
+    """
+    if "urls" in entry:
+        val = entry["urls"]
+        return val if isinstance(val, list) else [val]
+    if "url" in entry:
+        val = entry["url"]
+        return val if isinstance(val, list) else [val]
+    return []
+
+
 def list_searches() -> list[SearchConfig]:
     """Return all configured searches."""
     config = _load_raw()
@@ -33,7 +48,7 @@ def list_searches() -> list[SearchConfig]:
         searches.append(
             SearchConfig(
                 name=entry["name"],
-                url=entry["url"],
+                urls=_parse_urls(entry),
                 context=entry["context"],
                 max_price=entry.get("max_price"),
                 min_deal_score=entry.get("min_deal_score", 7),
@@ -44,7 +59,7 @@ def list_searches() -> list[SearchConfig]:
 
 def add_search(
     name: str,
-    url: str,
+    urls: list[str],
     context: str,
     max_price: Optional[float] = None,
     min_deal_score: int = 7,
@@ -56,7 +71,7 @@ def add_search(
 
     entry: dict = {
         "name": name,
-        "url": url,
+        "urls": urls,
         "context": context,
     }
     if max_price is not None:
@@ -68,7 +83,7 @@ def add_search(
     logger.info("Added search: %s", name)
 
     return SearchConfig(
-        name=name, url=url, context=context,
+        name=name, urls=urls, context=context,
         max_price=max_price, min_deal_score=min_deal_score,
     )
 
