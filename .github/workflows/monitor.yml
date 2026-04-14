@@ -33,6 +33,9 @@ jobs:
 
       - run: pip install -r requirements.txt
 
+      - name: Decode config
+        run: echo "${{ secrets.CONFIG_YAML_B64 }}" | base64 -d > config.yaml
+
       - name: Run monitor
         run: python main.py --once
         env:
