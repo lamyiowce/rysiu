@@ -326,14 +326,12 @@ class TelegramBot:
         return match.group(0).rstrip(".,;)") if match else None
 
     def _build_category_urls(self, category_ids: list[int], search_query: str) -> list[str]:
-        """Build one search URL per matching category, with fallback."""
-        urls = []
+        """Build search URLs: plain search + one per matching category."""
+        urls = [f"https://www.ricardo.ch/de/s/{quote_plus(search_query)}/"]
         for cid in category_ids:
             cat = _find_best_category(self._categories, cid, search_query)
             if cat:
                 urls.append(f"https://www.ricardo.ch/de/c/{cat['slug']}/{quote_plus(search_query)}/")
-        if not urls:
-            urls.append(f"https://www.ricardo.ch/de/s/{quote_plus(search_query)}/")
         return urls
 
     def _handle_add(self, chat_id: str, text: str) -> None:
